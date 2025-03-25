@@ -49,7 +49,7 @@ async def extract_ontogpt(request: Inputtext):
             return JSONResponse(content=json.loads(result_text))
         else:
             logging.error(f"OntoGPT failed for input: {input_text}. Error: {process.stderr.strip()}")
-            raise HTTPException(status_code=409, detail="OntoGPT processing error")
+            raise HTTPException(status_code=500, detail="OntoGPT processing error")
 
     except Exception as e:
         logging.error(f"Error in the ontogpt tool: {e}")
