@@ -4,10 +4,10 @@ import asyncio
 import logging
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState  
+from starlette.websockets import WebSocketState
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Dict 
+from typing import List, Dict
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,16 +43,16 @@ async def extract_ontogpt(request: Inputtext):
                 del error_messages[request.input_text]
                 return response
             await asyncio.sleep(1)
-        
+
         if request.input_text not in processed_messages:
             return JSONResponse(content={"error": "Processing took too long."}, status_code=504)
-        
+
         response_data = processed_messages[request.input_text]
         del processed_messages[request.input_text]
         return JSONResponse(content=response_data)
 
     except Exception as e:
-        logging.error(f"Error in plant_organ_segmentation: {e}")
+        logging.error(f"Error in the ontogpt tool: {e}")
         raise HTTPException(status_code=500, detail=f"An error occurred while processing the input text: {str(e)}")
 
 @app.websocket("/ws/new_message")
