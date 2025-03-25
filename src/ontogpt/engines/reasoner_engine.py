@@ -1,0 +1,313 @@
+"""
+Reasoner engine.
+
+This module provides the implementation of the
+ReasonerEngine class, which is used to perform
+reasoning tasks using a Language Model (LLM).
+The engine takes an ontology and a query task as input,
+translates it into an LLM prompt, and performs
+reasoning over the ontology.
+
+Classes:
+    ReasonerResult: Represents the result of a reason query.
+    ReasonerResultSet: Represents a set of reasoner results.
+    ReasonerEngine: Engine for performing reasoning using an LLM.
+
+Functions:
+    flatten_list(lst): Flattens a nested list into a single list.
+    reason(task, template_path=None, strict=False, evaluate=None): Performs
+    reasoning over axioms and query entailments.
+    reason_multiple(task_collection, **kwargs): Performs reasoning over multiple tasks.
+    _parse_single_answer(payload, task): Parses a single answer from the payload.
+    evaluate(result, task): Evaluates the result against the task.
+
+Usage:
+    The ReasonerEngine can be used to perform reasoning tasks
+    such as finding superclasses of a given class.
+    It can also provide explanations for the reasoning process.
+"""
+
+import logging
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Union
+
+from jinja2 import Template
+from pydantic import BaseModel
+
+from ontogpt.engines.knowledge_engine import KnowledgeEngine
+from ontogpt.ontex.extractor import (
+    Answer,
+    Axiom,
+    Explanation,
+    LLMReasonMethodType,
+    Task,
+    TaskCollection,
+)
+from ontogpt.prompts.reasoning import DEFAULT_REASONING_PROMPT
+from ontogpt.utils.parse_utils import split_on_one_of
+
+logger = logging.getLogger(__name__)
+
+
+def flatten_list(lst):
+    flat_list = []
+    for item in lst:
+        if isinstance(item, list):
+            flat_list.extend(flatten_list(item))
+        else:
+            flat_list.append(item)
+    return flat_list
+
+
+class ReasonerResult(BaseModel):
+    """The result of a reason query."""
+
+    name: Optional[str] = None
+    completed: Optional[bool] = True
+    task_name: Optional[str] = None
+    task_type: Optional[str] = None
+    task_obfuscated: Optional[bool] = None
+    method: Optional[LLMReasonMethodType] = None
+    model: Optional[str] = None
+    description: Optional[str] = None
+    answers: Optional[List[Answer]] = None
+    prompt: Optional[str] = None
+    completion: Optional[str] = None
+    jaccard_score: Optional[float] = 0.0
+    false_positives: Optional[List[str]] = None
+    false_negatives: Optional[List[str]] = None
+    num_false_positives: Optional[int] = None
+    num_false_negatives: Optional[int] = None
+    num_true_positives: Optional[int] = None
+    num_true_negatives: Optional[int] = None
+    precision: Optional[float] = 0.0
+    recall: Optional[float] = None
+    f1_score: Optional[float] = None
+    len_shortest_explanation: Optional[int] = None
+
+    class Config:
+        """Pydantic config."""
+
+        use_enum_values = True
+
+
+class ReasonerResultSet(BaseModel):
+    name: str = ""
+    results: List[ReasonerResult]
+
+
+@dataclass
+class ReasonerEngine(KnowledgeEngine):
+    """Engine for performing reasoning using an LLM.
+
+    This engine takes as input an Ontology, and a query Task,
+    and then translates this to an LLM prompt that asks the LLM to
+    perform the task over the ontology after reasoning over it.
+
+    The Task is typically a query such as finding superclasses of
+    a given class.
+
+    This is intended primarily for investigation purposes. For practical
+    scenarios, it is recommended to use a dedicated OWL reasoner. The goal
+    of this engine is to evaluate the extent to which the LLM can perform
+    reasoning-like tasks, including deduction and abduction (explanation).
+
+    Due to token-length constraints on some models, it is usually necessary
+    to extract a submodule prior to reasoning. This can be done using the
+    OntologyExtractor:
+
+    >>> from oaklib import get_adapter
+    >>> from ontogpt.ontex.extractor import OntologyExtractor, Task
+    >>> adapter = get_adapter("sqlite:obo:go")
+    >>> extractor = OntologyExtractor(adapter=adapter)
+    >>> task = extractor.extract_indirect_superclasses_task(
+    ...    subclass="GO:0005634", siblings=["GO:0005773"], roots=["GO:0043226"]
+    ... )
+
+    The extractor will actually perform the intended reasoning task, and include
+    the expected answer in the Task object. This may seem a little circular, but
+    the goal here is to evaluate.
+
+    The task can then be passed to the reasoner engine:
+
+    >>> from ontogpt.engines.reasoner_engine import ReasonerEngine
+    >>> reasoner = ReasonerEngine()
+    >>> result = reasoner.reason(task)
+
+    We can expand on this:
+
+    >>> for answer in result.answers:
+    ...    print(f"PARENT: {answer.text}")
+    <BLANKLINE>
+    PARENT: MembraneBoundedOrganelle
+    ...
+    PARENT: IntracellularOrganelle
+
+    We can also ask for explanations:
+
+    >>> task.include_explanations = True
+    >>> result = reasoner.reason(task)
+    >>> for answer in result.answers:
+    ...    print(f"PARENT: {answer.text}")
+    ...    if answer.explanations:
+    ...        print("  EXPLANATION:")
+    ...        for e in answer.explanations:
+    ...            for axiom in e.axioms:
+    ...                print(f"    AXIOM: {axiom.text}")
+    <BLANKLINE>
+    ...
+    PARENT: IntracellularOrganelle
+        EXPLANATION:
+            AXIOM: Nucleus SubClassOf IntracellularMembraneBoundedOrganelle
+            AXIOM: IntracellularMembraneBoundedOrganelle SubClassOf IntracellularOrganelle
+
+    """
+
+    completion_length = 250
+
+    def reason(
+        self, task: Task, template_path=None, strict=False, evaluate: bool = None
+    ) -> ReasonerResult:
+        """Reason over axioms and query entailments."""
+        if template_path is None:
+            template_path = DEFAULT_REASONING_PROMPT
+        if isinstance(template_path, Path):
+            template_path = str(template_path)
+        if isinstance(template_path, str):
+            # create a Jinja2 template object
+            with open(template_path) as file:
+                template_txt = file.read()
+                template = Template(template_txt)
+        prompt = template.render(
+            task=task,
+            ontology=task.ontology,
+            query=task.query,
+            examples=task.examples,
+        )
+        completion_length = self.completion_length
+        if task.method == LLMReasonMethodType.EXPLANATION:
+            completion_length *= 2
+        elif task.method == LLMReasonMethodType.CHAIN_OF_THOUGHT:
+            completion_length *= 2
+        logger.info(f"Prompt: {prompt}")
+        if self.encoding is not None:
+            prompt_length = len(self.encoding.encode(prompt)) + 10
+        else:
+            prompt_length = len(prompt)
+        completed = True
+        logger.info(f"PROMPT LENGTH: {prompt_length}")
+
+        payload = self.client.complete(prompt, max_tokens=completion_length)
+        if task.has_multiple_answers:
+            elements = payload.split("- ")
+            answers = [self._parse_single_answer(e, task) for e in elements]
+        else:
+            answers = [self._parse_single_answer(payload, task)]
+        answers = [a for a in flatten_list(answers) if a is not None]
+        result = ReasonerResult(
+            completed=completed,
+            task_name=task.name,
+            task_type=task.type,
+            task_obfuscated=task.obfuscated,
+            method=task.method,
+            len_shortest_explanation=task.len_shortest_explanation,
+            model=self.model,
+            prompt=prompt,
+            completion=payload,
+        )
+        # TODO: determine which it doesn't work to initialize with this
+        result.answers = answers  # type: ignore
+        logger.debug(f"Answers: {task.answers} // {answers}")
+        result.name = f"{task.name}-{task.method.value}-{self.model}"
+        if not task.answers and evaluate:
+            raise ValueError(f"Cannot evaluate without expected answers: {task}")
+        if task.answers is not None:
+            self.evaluate(result, task)
+        return result
+
+    def reason_multiple(self, task_collection: TaskCollection, **kwargs) -> ReasonerResultSet:
+        """
+        Reason over multiple tasks.
+
+        :param task_collection:
+        :param kwargs:
+        :return:
+        """
+        results = [self.reason(task, **kwargs) for task in task_collection.tasks]
+        return ReasonerResultSet(results=results)
+
+    def _parse_single_answer(
+        self, payload: str, task: Task
+    ) -> Optional[Union[Answer, List[Answer]]]:
+        """Parse single answer from payload.
+
+        In some cases for COT reasoning the model may compress multiple
+        answers into a single answer line.
+        """
+        payload = payload.strip()
+        if not payload:
+            return None
+        payload = payload.replace("\n", " ")
+        if task.chain_of_thought:
+            pattern = r"^REASONING:\s*\[\s*(.*?)\s*\]\s*CONCLUSION:\s*(.*?)$"
+            match = re.match(pattern, payload)
+            print(f"CHAIN OF THOUGHT: {payload}")
+            if match:
+                print(f"MATCH: {match.groups()}")
+                explanation = match.group(1)
+                text = match.group(2)
+                # rest = match.group(3)
+                axioms = [x.strip() for x in split_on_one_of(explanation, [";", ","])]
+                explanation = Explanation(axioms=[Axiom(text=a) for a in axioms if a])
+                axiom_texts = split_on_one_of(text, [";", ","])
+                if len(axiom_texts) == 1:
+                    return Answer(text=text, explanations=[explanation])
+                else:
+                    return [
+                        Answer(text=axiom_text, explanations=[explanation])
+                        for axiom_text in axiom_texts
+                    ]
+        pattern = r"^(.*?)\s*\[\s*(.*?)\s*\]\s*(.*?)$"
+        match = re.match(pattern, payload)
+        if match:
+            text = match.group(1)
+            explanation = match.group(2)
+            rest = match.group(3)
+            axioms = [x.strip() for x in split_on_one_of(explanation, [";", ","])]
+            explanation = Explanation(axioms=[Axiom(text=a) for a in axioms if a])
+            if rest:
+                explanation.comments = [rest]
+            return Answer(text=text, explanations=[explanation])
+        else:
+            return Answer(text=payload)
+
+    def evaluate(self, result: ReasonerResult, task: Task):
+        """Evaluate result against task."""
+        logger.debug(f"Evaluating result: {result}")
+        positives = {t.text for t in task.answers}
+        result_answer_texts = {a.text for a in result.answers}
+        ixn = positives.intersection(result_answer_texts)
+        all_texts = positives.union(result_answer_texts)
+        result.false_positives = list(result_answer_texts - positives)
+        result.false_negatives = list(positives - result_answer_texts)
+        result.num_false_positives = len(result.false_positives)
+        result.num_false_negatives = len(result.false_negatives)
+        result.num_true_positives = len(ixn)
+        tp_plus_tn = result.num_true_positives + result.num_false_positives
+        if tp_plus_tn == 0:
+            result.precision = 0.0
+        else:
+            result.precision = result.num_true_positives / tp_plus_tn
+        result.recall = result.num_true_positives / len(positives)
+        if len(all_texts) == 0:
+            result.jaccard_score = 0.0
+        else:
+            result.jaccard_score = len(ixn) / len(all_texts)
+        if result.num_true_positives == 0:
+            result.f1_score = 0.0
+        else:
+            result.f1_score = (
+                2 * (result.precision * result.recall) / (result.precision + result.recall)
+            )

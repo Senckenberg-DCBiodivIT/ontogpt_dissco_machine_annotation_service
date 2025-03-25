@@ -1,0 +1,100 @@
+id: http://w3id.org/ontogpt/environmental-sample-ungrounded
+name: environmental-sample-ungrounded
+title: Environmental Sample Template without grounding
+description: >-
+  A template for Environmental Samples, without any grounding beyond units
+license: https://creativecommons.org/publicdomain/zero/1.0/
+prefixes:
+  rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns#
+  ENVO: http://purl.obolibrary.org/obo/ENVO_
+  PATO: http://purl.obolibrary.org/obo/PATO_
+  UO: http://purl.obolibrary.org/obo/UO_
+  linkml: https://w3id.org/linkml/
+  sample: http://w3id.org/ontogpt/environmental-sample-ungrounded/
+
+default_prefix: sample
+default_range: string
+
+imports:
+  - linkml:types
+  - core
+
+classes:
+  Study:
+    tree_root: true
+    attributes:
+      location:
+        description: the sites at which the study was conducted
+        annotations:
+          prompt: semicolon-separated list of sites at which the study was conducted. Give specific place names. if you cannot find a specific place name leave the field as empty.
+        range: Location
+        multivalued: true
+
+      environmental_material:
+        description: the environmental material that was sampled
+        annotations:
+          prompt: semicolon-separated list of environmental materials
+        range: EnvironmentalMaterial
+        multivalued: true
+
+      environments:
+        annotations:
+          prompt: semicolon-separated list of environment terms for the location in which the study was conducted
+        multivalued: true
+        range: Environment
+
+      causal_relationships:
+        annotations:
+          prompt: semicolon-separated list of cause-effect pairs, for example, effect of temperature on growth
+        range: CausalRelationship
+        multivalued: true
+
+      variables:
+        annotations:
+          prompt: semicolon-separated list of study variables
+        range: Variable
+        multivalued: true
+
+      measurements:
+        annotations:
+          prompt: semicolon-separated list of value-measurement pairs
+        range: Measurement
+        multivalued: true
+
+  Location:
+    is_a: NamedEntity
+
+  EnvironmentalMaterial:
+    is_a: NamedEntity
+
+  Environment:
+    is_a: NamedEntity
+
+  Variable:
+    is_a: NamedEntity
+
+  Unit:
+    is_a: NamedEntity
+    id_prefixes:
+      - UO
+    annotations:
+      annotators: sqlite:obo:uo
+
+  Measurement:
+    is_a: CompoundExpression
+    attributes:
+      value:
+        description: the value of the measurement
+      unit:
+        description: the unit of the measurement
+        range: Unit
+
+  CausalRelationship:
+    is_a: CompoundExpression
+    attributes:
+      cause:
+        description: the variable that is the cause of the effect
+        range: Variable
+      effect:
+        description: the things that is affected
+        range: Variable

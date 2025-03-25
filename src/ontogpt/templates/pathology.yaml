@@ -1,0 +1,311 @@
+id: http://w3id.org/ontogpt/pathology
+name: pathology
+title: Pathology Grounding Template
+description: >-
+  A template for extracting and grounding pathology descriptions from text.
+license: https://creativecommons.org/publicdomain/zero/1.0/
+prefixes:
+  rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns#
+  PATO: http://purl.obolibrary.org/obo/PATO_
+  UBERON: http://purl.obolibrary.org/obo/UBERON_
+  linkml: https://w3id.org/linkml/
+  pathology: http://w3id.org/ontogpt/pathology
+keywords:
+  - pathology
+  - phenotype
+
+default_prefix: pathology
+default_range: string
+
+imports:
+  - linkml:types
+  - core
+
+# TODO: Tune the anatomy extraction; it seems to miss many instances
+# TODO: Try to be more specific about SNOMED terms, e.g., hemosiderin deposition
+# grounds to SNOMEDCT:70748002 but that's specific to "Hemosiderin measurement, urine" 
+# This may require instructions to reprocess the text to be more like SNOMED, e.g.,
+# "hepatitis" doesn't have a specific term but maybe inflammation is appropriate
+
+classes:
+
+  PathologyReport:
+    tree_root: true
+    description: >-
+      A semicolon-delimited list of statements, each describing a pathology,
+      including any diagnoses, one or more specific qualities being measured
+      and the anatomical location or tissue the pathology is measured in. Each
+      statement should describe a single condition.
+    attributes:
+      pathology_statements:
+        description: >-
+          A semicolon-delimited list of pathology statements, each describing a
+          pathology, including any diagnoses, one or more specific qualities
+          being measured and the anatomical location or tissue the pathology is
+          measured in. If any of the pathology statements are negative, the
+          negation should be included in each statement, e.g., "no granulomas or
+          viropathic changes" should become "no granulomas" and "no viropathic
+          changes".
+        range: PathologyStatement
+        multivalued: true
+      is_benign:
+        description: >-
+          Whether the overall pathology appears to be benign and not malignant.
+          Other pathologies may be present, but if tissue is described as
+          benign and/or if a carcinoma is explicitly excluded, this value should
+          be true. A statement of "no significant pathologic abnormality"
+          or the short form "nspa" would also have a value of true.
+          It it otherwise 'unclear'.
+        range: string
+        annotations:
+          prompt.example: true, false, unclear
+      risks:
+        description: >-
+          A semicolon-delimited list of risks for development of
+          more severe pathologies, along with what they are a risk for.
+          Format each in parentheses as "risk factor (potential pathology)".
+          If not specified, this value must be "Not Specified".
+        any_of:
+          - range: Risk
+          - range: string
+        multivalued: true
+      overall_classification_one:
+        description: >-
+          The final classification of the overall pathology. This must be a
+          single number, corresponding to one of
+          the following: 1 if No significant pathological abnormality, 2 if
+          Neoplastic malignant, 3 if Dysplastic, 4 if Proliferative
+          non-neoplastic, or 5 if Inflammatory and other non-proliferative
+          abnormalities.
+        range: PathologyClassificationOne
+      overall_classification_two:
+        description: >-
+          The final classification of the overall pathology. This must be a
+          code, like the following (i.e., "2" or "2a" are acceptable):
+          1. No significant pathological abnormality
+          2. Neoplastic malignant pathology
+          2a. Carcinoma
+          2b. Sarcoma
+          2c. Lymphoma
+          2d. Other neoplastic malignant growth
+          3. Dysplastic
+          3a. High grade dysplasia
+          3b. Low grade dysplasia
+          4. Proliferative non-neoplastic pathology
+          5. Inflammatory and other non-proliferative abnormalities
+          5a. Acute or active inflammation
+          5b. Chronic inflammation
+          5c. Eosinophils present
+          5d. Granulomas / histiocytes / macrophages present
+          5e. Organisms (Bacterial, Viral, Parasitic, Fungal) present
+          5f. Collagen abnormalities
+          5g. Vessel abnormalities
+          5h. Apoptosis
+          5i. Mast cells
+          5j. Amyloid
+        range: PathologyClassificationTwo
+
+  PathologyStatement:
+    description: >-
+      A statement that describes a pathology, including any diagnoses,
+      one or more specific qualities being measured and the anatomical
+      location or tissue the pathology is measured in.
+    attributes:
+      diagnosis:
+        description: >-
+          The diagnosis or pathology being described. This may include
+          full diagnoses or observations, for example, "colitis",
+          "inflammation", "dysplasia", "polyp". If not specified, this value
+          must be "Clinical finding". If a diagnosis cannot be reached
+          (e.g., due to lack of tissue sample), this value must be
+          "Clinical finding". Do not include qualifiers in this field,
+          e.g., "active colitis" should be "colitis".
+        range: Diagnosis
+        annotations:
+          prompt.example: colitis, inflammation, dysplasia
+      qualifiers:
+        description: >-
+          A semicolon-delimited list of descriptors other than those for
+          severity. If not specified, this value must be "Not Specified".
+        range: Qualifier
+        annotations:
+          prompt.example: active, chronic, focal
+        multivalued: true
+      severity:
+        description: >-
+          The severity of the pathology, for example, mild, moderate, or severe.
+          If not specified, this value must be "N/A".
+        range: SeverityLevel
+        annotations:
+          prompt.example: mild, moderate, severe
+      anatomical_entities:
+        description: >-
+          Semicolon-delimited list of anatomical locations or tissues
+          the pathology is measured in. This may need to be inferred from the
+          text, for example, "colitis" means the entity should be "colon".
+          A statement of "gastric antral-type mucosa" should be changed to
+          include only the anatomical entity, in this case "gastric mucosa".
+          If this is not specified or cannot be inferred then this value must
+          be "N/A".
+        range: AnatomicalEntity
+        annotations:
+          prompt.example: duodenum, colonic mucosa, liver
+        multivalued: true
+      negative:
+        description: >-
+          Whether the pathology is negative or not present. This must be
+          explicitly stated in the input, e.g., "no granulomas", in order
+          to be true. It is otherwise false.
+        range: string
+        annotations:
+          prompt.example: true, false
+
+  Diagnosis:
+    is_a: NamedEntity
+    id_prefixes:
+      - SNOMEDCT
+      - ICD10CM
+    annotations:
+      annotators: bioportal:SNOMEDCT, bioportal:ICD10CM, sqlite:obo:ncit, sqlite:obo:mesh, sqlite:obo:mondo
+
+  AnatomicalEntity:
+    is_a: NamedEntity
+    id_prefixes:
+      - UBERON
+    annotations:
+      annotators: sqlite:obo:uberon
+
+  Risk:
+    description: >-
+      A risk factor for development of more severe pathologies,
+      including but not limited to cancer. These will be in the format
+      "risk factor (potential pathology)".
+    attributes:
+      risk_factor:
+        description: >-
+          The risk factor for development of more severe pathologies.
+        range: string
+      potential_pathology:
+        description: >-
+          The pathology that the risk factor is a risk for.
+        range: Diagnosis
+    notes:
+      - Model may not be very good at this without more context
+
+  Qualifier:
+    is_a: NamedEntity
+    id_prefixes:
+      - PATO
+    annotations:
+      annotators: sqlite:obo:pato
+
+enums:
+  SeverityLevel:
+    description: >-
+      The severity of a pathology.
+    permissible_values:
+      mild:
+        description: >-
+          A pathology that is mild in severity.
+        meaning: PATO:0000394
+      moderate:
+        description: >-
+          A pathology that is moderate in severity.
+        meaning: PATO:0000395
+      severe:
+        description: >-
+          A pathology that is severe in severity.
+        meaning: PATO:0000396
+      Not Specified:
+        description: >-
+          The severity of the pathology is not specified.
+  PathologyClassificationOne:
+    description: >-
+      The final classification of the overall pathology. This uses
+      a system of five categories, identified numerically.
+    permissible_values:
+      1:
+        description: >-
+          No significant pathological abnormality was observed.
+      2:
+        description: >-
+          Neoplastic malignant growth was observed.
+      3:
+        description: >-
+          Dysplastic pathology was observed (i.e., abnormal or atypical cell
+          growth and/or appearance).
+      4:
+        description: >-
+          Proliferative non-neoplastic pathology was observed.
+      5:
+        description: >-
+          Inflammatory or other non-proliferative abnormalities were observed.
+  PathologyClassificationTwo:
+    description: >-
+      The final classification of the overall pathology. This must be a
+      code, "2" or "2a".
+    permissible_values:
+      1:
+        description: >-
+          No significant pathological abnormality was observed.
+      2:
+        description: >-
+          Neoplastic malignant pathology was observed.
+      2a:
+        description: >-
+          Carcinoma was observed.
+      2b:
+        description: >-
+          Sarcoma was observed.
+      2c:
+        description: >-
+          Lymphoma was observed.
+      2d:
+        description: >-
+          Other neoplastic malignant growth was observed.
+      3:
+        description: >-
+          Dysplastic pathology was observed (i.e., abnormal or atypical cell
+          growth and/or appearance).
+      3a:
+        description: >-
+          High grade dysplasia was observed.
+      3b:
+        description: >-
+          Low grade dysplasia was observed.
+      4:
+        description: >-
+          Proliferative non-neoplastic pathology was observed.
+      5:
+        description: >-
+          Inflammatory or other non-proliferative abnormalities were observed.
+      5a:
+        description: >-
+          Acute or active inflammation was observed.
+      5b:
+        description: >-
+          Chronic inflammation was observed.
+      5c:
+        description: >-
+          Eosinophils were present.
+      5d:
+        description: >-
+          Granulomas / histiocytes / macrophages were present.
+      5e:
+        description: >-
+          Organisms (Bacterial, Viral, Parasitic, Fungal) were present.
+      5f:
+        description: >-
+          Collagen abnormalities were observed.
+      5g:
+        description: >-
+          Vessel abnormalities were observed.
+      5h:
+        description: >-
+          Apoptosis was observed.
+      5i:
+        description: >-
+          Mast cells were observed.
+      5j:
+        description: >-
+          Amyloid was observed.
