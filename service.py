@@ -5,8 +5,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
-logging.basicConfig(level=logging.INFO)
+from pydantic_settings import BaseSettings
 
 class Inputtext(BaseModel):
     input_text: str
@@ -19,9 +18,13 @@ class ErrorMessageRequest(BaseModel):
     input_text: str
     error: str
 
+class Settings(BaseSettings):
+    log_level: str = "INFO"
+    template_path: str = "habitat_template_v2.yaml"
+    llm_model: str = "ollama/mistral"
 
-template_path = "habitat_template_v2.yaml"
-
+settings = Settings()
+logging.basicConfig(level=logging.getLevelNamesMapping()[settings.log_level])
 
 app = FastAPI()
 
@@ -30,7 +33,7 @@ async def extract_ontogpt(request: Inputtext):
     try:
         input_text = request.input_text
         process = subprocess.run(
-            ['ontogpt', '-v', 'extract', '-t', template_path, '-m', 'ollama/mistral'],
+            ['ontogpt', '-v', 'extract', '-t', settings.template_path, '-m', settings.llm_model],
             input=input_text,
             text=True,
             capture_output=True
