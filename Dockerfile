@@ -1,6 +1,10 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
+
+# Install ontogpt
+RUN apt update && apt install -y gcc
+RUN pip install --upgrade pip && pip install ontogpt==1.0.10
 
 # Install dependencies
 COPY requirements.txt .
