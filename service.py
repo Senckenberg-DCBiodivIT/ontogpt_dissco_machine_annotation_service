@@ -20,7 +20,7 @@ class ErrorMessageRequest(BaseModel):
     error: str
 
 class Settings(BaseSettings):
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
     template_path: str = "habitat_template_v2.yaml"
     llm_model: str = "ollama/mistral"
 
@@ -37,12 +37,14 @@ async def startup_event():
 async def extract_ontogpt(request: Inputtext):
     try:
         input_text = request.input_text
+        logging.info(f"Processing input text: {input_text}")
         process = subprocess.run(
-            ['ontogpt', 'extract', '-t', settings.template_path, '-m', settings.llm_model, '-O', 'json'],
+            ['ontogpt', '-v', 'extract', '-t', settings.template_path, '-m', settings.llm_model, '-O', 'json'],
             input=input_text,
             text=True,
             capture_output=True
         )
+        logging.debug("OntoGPT message: " + process.stderr)
         if process.returncode == 0:
             result_text = process.stdout.strip()
             logging.info(f"OntoGPT processing successful for input: {input_text}")
