@@ -1,6 +1,7 @@
 import subprocess
 import uvicorn
 import logging
+import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -37,7 +38,7 @@ async def extract_ontogpt(request: Inputtext):
     try:
         input_text = request.input_text
         process = subprocess.run(
-            ['ontogpt', '-v', 'extract', '-t', settings.template_path, '-m', settings.llm_model],
+            ['ontogpt', 'extract', '-t', settings.template_path, '-m', settings.llm_model, '-O', 'json'],
             input=input_text,
             text=True,
             capture_output=True
@@ -45,7 +46,7 @@ async def extract_ontogpt(request: Inputtext):
         if process.returncode == 0:
             result_text = process.stdout.strip()
             logging.info(f"OntoGPT processing successful for input: {input_text}")
-            return JSONResponse(content=result_text)
+            return JSONResponse(content=json.loads(result_text))
         else:
             logging.error(f"OntoGPT failed for input: {input_text}. Error: {process.stderr.strip()}")
             raise HTTPException(status_code=409, detail="OntoGPT processing error")
