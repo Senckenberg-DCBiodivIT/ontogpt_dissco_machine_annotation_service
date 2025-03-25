@@ -28,6 +28,10 @@ logging.basicConfig(level=logging.getLevelNamesMapping()[settings.log_level])
 
 app = FastAPI()
 
+@app.on_event("startup")
+async def startup_event():
+    logging.info(f"Starting application with template={settings.template_path}, model={settings.llm_model}")
+
 @app.post("/extract_ontogpt")
 async def extract_ontogpt(request: Inputtext):
     try:
