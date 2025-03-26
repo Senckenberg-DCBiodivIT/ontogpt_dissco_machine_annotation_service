@@ -6,7 +6,9 @@ import json
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings
+
+from .config import Settings
+
 
 class Inputtext(BaseModel):
     input_text: str
@@ -19,10 +21,6 @@ class ErrorMessageRequest(BaseModel):
     input_text: str
     error: str
 
-class Settings(BaseSettings):
-    log_level: str = "DEBUG"
-    template_path: str = "habitat_template_v2.yaml"
-    llm_model: str = "ollama/mistral"
 
 settings = Settings()
 logging.basicConfig(level=logging.getLevelNamesMapping()[settings.log_level])
@@ -39,7 +37,7 @@ async def extract_ontogpt(request: Inputtext):
         input_text = request.input_text
         logging.info(f"Processing input text: {input_text}")
         process = subprocess.run(
-            ['ontogpt', '-v', 'extract', '-t', settings.template_path, '-m', settings.llm_model, '-O', 'json'],
+            [settings.ontogpt_path_to_binary, '-v', 'extract', '-t', settings.template_path, '-m', settings.llm_model, '-O', 'json'],
             input=input_text,
             text=True,
             capture_output=True
@@ -60,4 +58,4 @@ async def extract_ontogpt(request: Inputtext):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host=settings.host, port=settings.port)
